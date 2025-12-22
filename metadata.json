@@ -1,0 +1,7 @@
+{
+  "name": "Precision Berth Management System (PBMS)",
+  "description": "An NFC-enabled indoor positioning system for bus hubs, featuring a Bus Captain interface, Operations Manager dashboard, and Gemini-powered voice assistant for real-time fleet coordination.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
