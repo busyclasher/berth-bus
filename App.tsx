@@ -1,20 +1,31 @@
 
 import React, { useState } from 'react';
-import { Bus, Berth, UserRole, PerformanceMetric } from './types';
-import { INITIAL_BERTHS, INITIAL_BUSES, MOCK_PERFORMANCE } from './constants';
+import { Bus, Berth, UserRole, PerformanceMetric, ShiftNote } from './types';
+import { INITIAL_BERTHS, INITIAL_BUSES, MOCK_PERFORMANCE, INITIAL_SHIFT_NOTES, MOCK_ANALYTICS } from './constants';
 import BusCaptainInterface from './components/BusCaptainInterface';
 import OperationsDashboard from './components/OperationsDashboard';
+import TechnicianInterface from './components/TechnicianInterface';
 import VoiceAssistant from './components/VoiceAssistant';
-import { LayoutDashboard, Bus as BusIcon, User } from 'lucide-react';
+import { LayoutDashboard, Bus as BusIcon, User, Wrench } from 'lucide-react';
 
 const App: React.FC = () => {
-  const [role, setRole] = useState<UserRole['type']>('OPERATIONS_MANAGER');
+  const [role, setRole] = useState<'OPERATIONS_MANAGER' | 'BUS_CAPTAIN' | 'TECHNICIAN'>('OPERATIONS_MANAGER');
   const [buses, setBuses] = useState<Bus[]>(INITIAL_BUSES);
   const [berths, setBerths] = useState<Berth[]>(INITIAL_BERTHS);
   const [performance] = useState<PerformanceMetric[]>(MOCK_PERFORMANCE);
+  const [shiftNotes, setShiftNotes] = useState<ShiftNote[]>(INITIAL_SHIFT_NOTES);
+  const [analytics] = useState(MOCK_ANALYTICS);
   
   // State to bridge voice command to BC interface modal
   const [tapInTrigger, setTapInTrigger] = useState(0);
+
+  // Helper function to get level and zone from berth ID
+  const getBerthLocation = (berthId: string) => {
+    const berthNum = parseInt(berthId.replace('B', ''));
+    if (berthNum <= 4) return { level: 'Level 1', zone: 'Zone A' };
+    if (berthNum <= 8) return { level: 'Level 2', zone: 'Zone B' };
+    return { level: 'Level 3', zone: 'Zone C' };
+  };
 
   const handleStatusUpdate = (busId: string, status: Bus['status'], berthId?: string) => {
     setBuses(prevBuses => prevBuses.map(bus => {
@@ -34,16 +45,54 @@ const App: React.FC = () => {
           ));
         }
 
+        // Get location info if berth is assigned
+        const location = berthId ? getBerthLocation(berthId) : { level: undefined, zone: undefined };
+
+        // Check if berth has charger and start charging if applicable
+        const berth = berthId ? berths.find(b => b.id === berthId) : null;
+        const shouldCharge = berth?.hasCharger && (status === 'IN_PORT' || status === 'LAYOVER');
+
+        // Update berth charger status
+        if (berth && shouldCharge) {
+          setBerths(prevBerths => prevBerths.map(b => 
+            b.id === berthId && b.hasCharger ? { ...b, chargerStatus: 'in-use' as const } : b
+          ));
+        }
+
         return {
           ...bus,
           status,
-          berthId,
+          berthId: berthId || undefined,
+          level: berthId ? location.level : undefined,
+          zone: berthId ? location.zone : undefined,
           checkInTime: status === 'IN_PORT' ? new Date().toISOString() : bus.checkInTime,
-          scheduledDeparture: status === 'IN_PORT' ? new Date(Date.now() + 15 * 60000).toISOString() : bus.scheduledDeparture
+          scheduledDeparture: status === 'IN_PORT' ? new Date(Date.now() + 15 * 60000).toISOString() : bus.scheduledDeparture,
+          lastTapTime: (status === 'IN_PORT' || status === 'EN_ROUTE') ? new Date().toISOString() : bus.lastTapTime,
+          isCharging: shouldCharge || bus.isCharging,
+          lastChargeTime: shouldCharge ? new Date().toISOString() : bus.lastChargeTime,
         };
       }
       return bus;
     }));
+  };
+
+  const handleAddNote = (note: Omit<ShiftNote, 'id' | 'timestamp'>) => {
+    const newNote: ShiftNote = {
+      ...note,
+      id: `N${Date.now()}`,
+      timestamp: new Date().toISOString(),
+    };
+    setShiftNotes(prev => [newNote, ...prev]);
+  };
+
+  const handleResolveNote = (noteId: string) => {
+    setShiftNotes(prev => prev.map(note => 
+      note.id === noteId ? { ...note, resolved: true } : note
+    ));
+  };
+
+  const handleDeleteNote = (noteId: string) => {
+    setShiftNotes(prev => prev.filter(note => note.id !== noteId));
   };
 
   const onVoiceInitiateTapIn = () => {
@@ -70,20 +119,27 @@ const App: React.FC = () => {
           </div>
 
           {/* Switcher Buttons */}
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-2 md:gap-3">
             <button 
               onClick={() => setRole('OPERATIONS_MANAGER')}
-              className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all ${role === 'OPERATIONS_MANAGER' ? 'text-blue-600 bg-blue-50 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
+              className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-2 md:px-4 py-2 rounded-xl transition-all ${role === 'OPERATIONS_MANAGER' ? 'text-blue-600 bg-blue-50 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
             >
               <LayoutDashboard size={18} className="md:size-[20px]" />
               <span className="text-[10px] md:text-sm uppercase font-bold tracking-wider">Manager</span>
             </button>
             <button 
               onClick={() => setRole('BUS_CAPTAIN')}
-              className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 md:px-4 py-2 rounded-xl transition-all ${role === 'BUS_CAPTAIN' ? 'text-blue-600 bg-blue-50 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
+              className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-2 md:px-4 py-2 rounded-xl transition-all ${role === 'BUS_CAPTAIN' ? 'text-blue-600 bg-blue-50 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
             >
               <BusIcon size={18} className="md:size-[20px]" />
               <span className="text-[10px] md:text-sm uppercase font-bold tracking-wider">Captain</span>
+            </button>
+            <button 
+              onClick={() => setRole('TECHNICIAN')}
+              className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-2 md:px-4 py-2 rounded-xl transition-all ${role === 'TECHNICIAN' ? 'text-blue-600 bg-blue-50 font-bold' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              <Wrench size={18} className="md:size-[20px]" />
+              <span className="text-[10px] md:text-sm uppercase font-bold tracking-wider">Technician</span>
             </button>
           </div>
 
@@ -108,11 +164,22 @@ const App: React.FC = () => {
             onStatusUpdate={handleStatusUpdate}
             externalTriggerTapIn={tapInTrigger}
           />
+        ) : role === 'TECHNICIAN' ? (
+          <TechnicianInterface 
+            buses={buses}
+            berths={berths}
+            onStatusUpdate={handleStatusUpdate}
+          />
         ) : (
           <OperationsDashboard 
             buses={buses}
             berths={berths}
             performance={performance}
+            analytics={analytics}
+            shiftNotes={shiftNotes}
+            onAddNote={handleAddNote}
+            onResolveNote={handleResolveNote}
+            onDeleteNote={handleDeleteNote}
           />
         )}
       </main>

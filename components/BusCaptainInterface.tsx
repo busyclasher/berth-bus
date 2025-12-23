@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Bus, Berth } from '../types';
-import { Smartphone, Clock, MapPin, Navigation2, AlertTriangle, BellRing, CheckCircle, Bus as BusIcon } from 'lucide-react';
+import { Smartphone, Clock, MapPin, Navigation2, AlertTriangle, BellRing, CheckCircle, Bus as BusIcon, Zap, Battery, BatteryCharging } from 'lucide-react';
 
 interface BCProps {
   bus: Bus;
@@ -77,6 +77,42 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
     setShowPunctualityPrompt(false);
   };
 
+  const handleAutoAssign = () => {
+    // Smart berth assignment logic:
+    // 1. Prefer berths with chargers if battery < 50%
+    // 2. Then BOARDING berths (most common use case)
+    // 3. Then LAYOVER berths 
+    // 4. Finally ALIGHTING berths
+    const needsCharging = bus.batteryLevel && bus.batteryLevel < 50;
+    
+    let availableBerth: Berth | undefined;
+    
+    // Priority 1: If low battery, find berth with charger
+    if (needsCharging) {
+      availableBerth = berths.find(b => !b.isOccupied && b.hasCharger);
+    }
+    
+    // Priority 2: Find by berth type priority
+    if (!availableBerth) {
+      const priorityOrder: Berth['type'][] = ['BOARDING', 'LAYOVER', 'ALIGHTING'];
+      for (const type of priorityOrder) {
+        availableBerth = berths.find(b => !b.isOccupied && b.type === type);
+        if (availableBerth) break;
+      }
+    }
+    
+    // Fallback: any available berth
+    if (!availableBerth) {
+      availableBerth = berths.find(b => !b.isOccupied);
+    }
+    
+    if (availableBerth) {
+      // Pre-select the berth and show NFC prompt
+      setSelectedBerth(availableBerth.id);
+      setShowNfcPrompt(true);
+    }
+  };
+
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
@@ -93,25 +129,105 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
           </span>
         </div>
         <h1 className="text-4xl font-black tracking-tight">{bus.plateNo}</h1>
-        <div className="flex items-center gap-2 mt-4 opacity-70">
-          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <p className="text-xs font-bold uppercase tracking-widest">Captain ID: {bus.captainId}</p>
+        <div className="flex items-center justify-between mt-4">
+          <div className="flex items-center gap-2 opacity-70">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <p className="text-xs font-bold uppercase tracking-widest">Captain ID: {bus.captainId}</p>
+          </div>
+          
+          {/* Battery Indicator */}
+          {bus.batteryLevel !== undefined && (
+            <div className="flex items-center gap-2 bg-white/20 px-3 py-1.5 rounded-full backdrop-blur-sm">
+              {bus.isCharging ? (
+                <BatteryCharging size={16} className="status-pulse" />
+              ) : (
+                <Battery size={16} />
+              )}
+              <span className="text-sm font-black">{bus.batteryLevel}%</span>
+            </div>
+          )}
         </div>
       </header>
 
       {bus.status === 'EN_ROUTE' && (
-        <button
-          onClick={() => setShowNfcPrompt(true)}
-          className="bg-white border-2 border-dashed border-blue-200 rounded-3xl p-10 flex flex-col items-center justify-center gap-6 transition-all hover:border-blue-500 hover:bg-blue-50/30 active:scale-95 shadow-sm group"
-        >
-          <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
-            <Smartphone size={40} />
+        <>
+          {/* Auto-Assign Button */}
+          <button
+            onClick={handleAutoAssign}
+            disabled={berths.filter(b => !b.isOccupied).length === 0}
+            className="bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-3xl p-6 flex items-center justify-between gap-4 transition-all hover:from-green-600 hover:to-emerald-600 active:scale-95 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale group"
+          >
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm group-hover:scale-110 transition-transform">
+                <Zap size={28} />
+              </div>
+              <div className="text-left">
+                <h3 className="font-black text-lg leading-tight">Get Assigned Berth</h3>
+                <p className="text-green-50 text-xs mt-1 font-medium">
+                  {berths.filter(b => !b.isOccupied).length > 0 
+                    ? 'System assigns → Walk to berth → Tap NFC' 
+                    : 'No berths available'}
+                </p>
+              </div>
+            </div>
+            <div className="bg-white/20 rounded-full px-3 py-1 text-xs font-black backdrop-blur-sm">
+              {berths.filter(b => !b.isOccupied).length} OPEN
+            </div>
+          </button>
+          
+          {/* Smart Assignment Info */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-100 rounded-2xl p-5">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+                <Zap size={20} />
+              </div>
+              <div className="flex-1">
+                <h4 className="font-black text-blue-900 text-base mb-1">Smart Assignment System</h4>
+                <p className="text-blue-700 text-xs font-medium leading-relaxed">
+                  Our AI automatically selects the optimal berth based on:
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 ml-13">
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                <span className="font-bold text-blue-900">
+                  Battery Level: {bus.batteryLevel && bus.batteryLevel < 50 ? '⚡ Low battery - assigns charging berth' : '✅ Good level'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                <span className="font-bold text-blue-900">Berth Type: Prioritizes BOARDING → LAYOVER → ALIGHTING</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                <span className="font-bold text-blue-900">Availability: Real-time occupancy check</span>
+              </div>
+            </div>
+            
+            {berths.filter(b => !b.isOccupied).length > 0 && (
+              <div className="mt-4 pt-4 border-t border-blue-200">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {['BOARDING', 'ALIGHTING', 'LAYOVER'].map(type => {
+                    const count = berths.filter(b => !b.isOccupied && b.type === type).length;
+                    const chargingCount = berths.filter(b => !b.isOccupied && b.type === type && b.hasCharger).length;
+                    const colors = {
+                      'BOARDING': 'bg-blue-100 text-blue-700 border-blue-200',
+                      'ALIGHTING': 'bg-orange-100 text-orange-700 border-orange-200',
+                      'LAYOVER': 'bg-gray-100 text-gray-700 border-gray-200'
+                    };
+                    return count > 0 ? (
+                      <span key={type} className={`px-2 py-1 rounded-md font-bold border ${colors[type as keyof typeof colors]} flex items-center gap-1`}>
+                        {count} {type}
+                        {chargingCount > 0 && <Zap size={12} className="text-green-600" title={`${chargingCount} with charger`} />}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            )}
           </div>
-          <div className="text-center">
-            <h3 className="font-black text-xl text-gray-900">Tap-In at Berth</h3>
-            <p className="text-gray-500 text-sm mt-1 font-medium">Hold device near NFC tag on arrival</p>
-          </div>
-        </button>
+        </>
       )}
 
       {(bus.status === 'IN_PORT' || bus.status === 'LAYOVER') && (
@@ -154,10 +270,20 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
           <div className="bg-white rounded-full p-8 mb-8 shadow-2xl scale-110 animate-bounce">
             <CheckCircle size={96} className="text-green-600" />
           </div>
-          <h2 className="text-4xl font-black text-white tracking-tight mb-3">Arrival Verified</h2>
-          <div className="space-y-1">
-            <p className="text-green-50 font-black uppercase tracking-[0.2em] text-sm">Assigned Berth: {selectedBerth}</p>
-            <p className="text-green-100/70 font-bold uppercase tracking-widest text-[10px]">Service {bus.serviceNo} • System Synced</p>
+          <h2 className="text-4xl font-black text-white tracking-tight mb-3">NFC Tap Verified!</h2>
+          <div className="space-y-2 mb-4">
+            <p className="text-green-50 font-black uppercase tracking-[0.2em] text-2xl">{selectedBerth}</p>
+            <p className="text-green-100 font-bold text-sm">
+              {berths.find(b => b.id === selectedBerth)?.hasCharger && '⚡ Now Charging'}
+            </p>
+            <p className="text-green-100/70 font-bold uppercase tracking-widest text-[10px]">
+              Service {bus.serviceNo} • {bus.plateNo} • Check-In Complete
+            </p>
+          </div>
+          <div className="bg-white/20 backdrop-blur-sm rounded-2xl px-6 py-3">
+            <p className="text-white text-xs font-bold">
+              ✅ Location Logged: {selectedBerth} • System Synced
+            </p>
           </div>
           <div className="mt-12 flex gap-3">
              <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse" />
@@ -167,43 +293,88 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
         </div>
       )}
 
-      {/* NFC / Berth Selection Modal */}
+      {/* NFC Tap Modal */}
       {showNfcPrompt && (
-        <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 animate-slide-up shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-black text-gray-900 tracking-tight">Select Berth</h2>
-              <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
-                <Smartphone size={20} />
+        <div className="fixed inset-0 bg-gray-900/90 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 animate-slide-up shadow-2xl">
+            {/* Header */}
+            <div className="text-center mb-8">
+              <div className="w-24 h-24 bg-blue-600 rounded-full mx-auto mb-6 flex items-center justify-center shadow-2xl">
+                <Smartphone size={48} className="text-white" />
+              </div>
+              <h2 className="text-3xl font-black text-gray-900 tracking-tight mb-2">Your Assigned Berth</h2>
+              <p className="text-gray-500 font-medium text-sm">Walk to the berth and tap the NFC tag</p>
+            </div>
+
+            {/* Assigned Berth Display */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-3xl p-6 mb-6 border-2 border-blue-200">
+              <div className="text-center">
+                <p className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Proceed To</p>
+                <div className="text-6xl font-black text-blue-600 mb-3">{selectedBerth}</div>
+                {berths.find(b => b.id === selectedBerth)?.hasCharger && (
+                  <div className="inline-flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-full text-sm font-bold">
+                    <Zap size={16} />
+                    Charging Available
+                  </div>
+                )}
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3 mb-8">
-              {berths.map(berth => (
-                <button
-                  key={berth.id}
-                  onClick={() => setSelectedBerth(berth.id)}
-                  disabled={berth.isOccupied}
-                  className={`py-4 rounded-2xl font-black transition-all text-sm ${
-                    selectedBerth === berth.id
-                      ? 'bg-blue-600 text-white shadow-xl scale-105 ring-4 ring-blue-100'
-                      : berth.isOccupied
-                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed opacity-50'
-                      : 'bg-gray-50 text-gray-700 hover:bg-gray-100 hover:scale-105 active:scale-95'
-                  }`}
-                >
-                  {berth.id}
-                </button>
-              ))}
+
+            {/* Location Info */}
+            {(() => {
+              const berthNum = parseInt(selectedBerth.replace('B', ''));
+              let level = 'Level 1', zone = 'Zone A';
+              if (berthNum <= 4) { level = 'Level 1'; zone = 'Zone A'; }
+              else if (berthNum <= 8) { level = 'Level 2'; zone = 'Zone B'; }
+              else { level = 'Level 3'; zone = 'Zone C'; }
+              
+              return (
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  <div className="bg-gray-50 rounded-2xl p-4 text-center">
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1">Level</p>
+                    <p className="text-2xl font-black text-gray-900">{level.split(' ')[1]}</p>
+                  </div>
+                  <div className="bg-gray-50 rounded-2xl p-4 text-center">
+                    <p className="text-xs font-bold text-gray-500 uppercase mb-1">Zone</p>
+                    <p className="text-2xl font-black text-gray-900">{zone.split(' ')[1]}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Instructions */}
+            <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600 shrink-0">
+                  <Smartphone size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-orange-900 text-sm mb-1">Tap NFC to Confirm</h4>
+                  <p className="text-xs text-orange-700 leading-relaxed">
+                    Hold your device near the NFC tag at <span className="font-black">{selectedBerth}</span> to complete check-in
+                  </p>
+                </div>
+              </div>
             </div>
+
+            {/* Action Buttons */}
             <div className="flex flex-col gap-3">
               <button
-                disabled={!selectedBerth}
                 onClick={handleTapIn}
-                className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl disabled:opacity-50 disabled:grayscale shadow-lg active:scale-95 transition-all uppercase tracking-widest text-sm"
+                className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl shadow-lg hover:bg-blue-700 active:scale-95 transition-all uppercase tracking-widest text-sm flex items-center justify-center gap-3"
               >
-                Confirm Arrival
+                <Smartphone size={20} />
+                Simulate NFC Tap
               </button>
-              <button onClick={() => setShowNfcPrompt(false)} className="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors uppercase tracking-widest text-[10px]">Cancel Tap-In</button>
+              <button 
+                onClick={() => {
+                  setShowNfcPrompt(false);
+                  setSelectedBerth('');
+                }} 
+                className="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors uppercase tracking-widest text-[10px]"
+              >
+                Cancel & Choose Different Berth
+              </button>
             </div>
           </div>
         </div>

@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
-import { Bus, Berth, PerformanceMetric } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Bus, Berth, PerformanceMetric, AnalyticsData, ShiftNote } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import AnalyticsDashboard from './AnalyticsDashboard';
+import ShiftHandover from './ShiftHandover';
 import { 
   LayoutGrid, 
   Activity, 
@@ -17,19 +19,61 @@ import {
   Bus as BusIcon,
   Timer,
   ChevronRight,
-  Info
+  Info,
+  AlertTriangle,
+  Clock,
+  Zap,
+  Battery,
+  BatteryCharging
 } from 'lucide-react';
 
 interface DashboardProps {
   buses: Bus[];
   berths: Berth[];
   performance: PerformanceMetric[];
+  analytics: AnalyticsData;
+  shiftNotes: ShiftNote[];
+  onAddNote: (note: Omit<ShiftNote, 'id' | 'timestamp'>) => void;
+  onResolveNote: (noteId: string) => void;
+  onDeleteNote: (noteId: string) => void;
 }
 
-const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performance }) => {
+const OperationsDashboard: React.FC<DashboardProps> = ({ 
+  buses, 
+  berths, 
+  performance, 
+  analytics, 
+  shiftNotes,
+  onAddNote,
+  onResolveNote,
+  onDeleteNote 
+}) => {
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics' | 'handover'>('overview');
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [showThresholdConfig, setShowThresholdConfig] = useState(false);
+  const [inactivityThresholdHours, setInactivityThresholdHours] = useState(2);
   const occupiedBerthsCount = berths.filter(b => b.isOccupied).length;
   const inPortBuses = buses.filter(b => b.status === 'IN_PORT');
+
+  // Update current time every minute to check for stale buses
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // Check every minute
+    return () => clearInterval(interval);
+  }, []);
+
+  // Check for buses that haven't tapped in for a long time (potential breakdown)
+  // Configurable threshold (default: 2 hours)
+  const INACTIVITY_THRESHOLD = inactivityThresholdHours * 60 * 60 * 1000; // hours in milliseconds
+  const staleBuses = buses.filter(bus => {
+    if (bus.status === 'EN_ROUTE' && bus.lastTapTime) {
+      const timeSinceLastTap = currentTime - new Date(bus.lastTapTime).getTime();
+      return timeSinceLastTap > INACTIVITY_THRESHOLD;
+    }
+    return false;
+  });
 
   const getBerthIcon = (type: Berth['type']) => {
     switch (type) {
@@ -41,38 +85,144 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
 
   return (
     <div className="p-4 md:p-8 space-y-8 max-w-7xl mx-auto pb-20">
+      {/* Critical Alert Banner for Stale Buses */}
+      {staleBuses.length > 0 && (
+        <div className="bg-red-600 text-white p-4 md:p-6 rounded-3xl shadow-xl animate-pulse">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm shrink-0">
+              <AlertTriangle size={24} />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-lg mb-2 flex items-center gap-2">
+                ⚠️ Critical: {staleBuses.length} Bus{staleBuses.length > 1 ? 'es' : ''} May Have Broken Down
+              </h3>
+              <p className="text-red-100 text-sm font-medium mb-3">
+                The following buses haven't tapped a berth for over {inactivityThresholdHours} hours. Immediate investigation required.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {staleBuses.map(bus => {
+                  const hoursSinceLastTap = bus.lastTapTime 
+                    ? Math.floor((currentTime - new Date(bus.lastTapTime).getTime()) / (60 * 60 * 1000))
+                    : 0;
+                  return (
+                    <div key={bus.id} className="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
+                      <Clock size={14} />
+                      {bus.plateNo} (S{bus.serviceNo}) - {hoursSinceLastTap}h inactive
+                    </div>
+                  );
+                })}
+              </div>
+              <button 
+                onClick={() => setShowThresholdConfig(!showThresholdConfig)}
+                className="text-xs underline hover:text-red-100 transition-colors"
+              >
+                {showThresholdConfig ? 'Hide' : 'Configure'} alert threshold
+              </button>
+              {showThresholdConfig && (
+                <div className="mt-3 pt-3 border-t border-white/20 flex items-center gap-4">
+                  <label className="text-sm font-medium">Alert after:</label>
+                  <input 
+                    type="number" 
+                    min="1" 
+                    max="24"
+                    value={inactivityThresholdHours}
+                    onChange={(e) => setInactivityThresholdHours(Number(e.target.value))}
+                    className="w-20 px-3 py-1 rounded-lg text-gray-900 font-bold text-sm"
+                  />
+                  <span className="text-sm font-medium">hours of inactivity</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Hub Operations Control</h1>
           <p className="text-gray-500 font-medium">Precision Berth Management • Changi Interchange Terminal</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex bg-white rounded-xl border border-gray-200 p-1 shadow-sm">
-            <button 
-              onClick={() => setViewMode('grid')}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-            >
-              <Grid3X3 size={14} /> GRID
-            </button>
-            <button 
-              onClick={() => setViewMode('map')}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'map' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
-            >
-              <MapIcon size={14} /> DEPOT MAP
-            </button>
-          </div>
           <div className="bg-green-100 text-green-700 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 border border-green-200">
             <Activity size={14} className="status-pulse" /> SYSTEM LIVE
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Total Berths" value={berths.length} icon={<LayoutGrid />} subValue={`${occupiedBerthsCount} Occupied`} />
-        <StatCard title="Buses In-Port" value={inPortBuses.length} icon={<Activity />} subValue="Active boarding" color="text-blue-600" />
-        <StatCard title="Avg. Turnaround" value={`${performance[performance.length-1].turnaroundMinutes}m`} icon={<History />} subValue="Last hour average" color="text-orange-600" />
-        <StatCard title="Efficiency Score" value="94%" icon={<TrendingUp />} subValue="+2% from yesterday" color="text-green-600" />
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-2 border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`px-6 py-3 font-bold text-sm transition-all ${
+            activeTab === 'overview'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <LayoutGrid size={16} />
+            Overview & Berths
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`px-6 py-3 font-bold text-sm transition-all ${
+            activeTab === 'analytics'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <TrendingUp size={16} />
+            Analytics & ROI
+          </div>
+        </button>
+        <button
+          onClick={() => setActiveTab('handover')}
+          className={`px-6 py-3 font-bold text-sm transition-all relative ${
+            activeTab === 'handover'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Clock size={16} />
+            Shift Handover
+            {shiftNotes.filter(n => !n.resolved).length > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                {shiftNotes.filter(n => !n.resolved).length}
+              </span>
+            )}
+          </div>
+        </button>
       </div>
+
+      {activeTab === 'overview' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard title="Total Berths" value={berths.length} icon={<LayoutGrid />} subValue={`${occupiedBerthsCount} Occupied`} />
+            <StatCard title="Buses In-Port" value={inPortBuses.length} icon={<Activity />} subValue="Active boarding" color="text-blue-600" />
+            <StatCard title="Charging Stations" value={berths.filter(b => b.hasCharger).length} icon={<BatteryCharging />} subValue={`${berths.filter(b => b.chargerStatus === 'in-use').length} In Use`} color="text-green-600" />
+            <StatCard title="Low Battery Buses" value={buses.filter(b => (b.batteryLevel || 100) < 30).length} icon={<Battery />} subValue="Need charging" color="text-red-600" />
+          </div>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center gap-3">
+            <div className="flex bg-white rounded-xl border border-gray-200 p-1 shadow-sm">
+              <button 
+                onClick={() => setViewMode('grid')}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'grid' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                <Grid3X3 size={14} /> GRID
+              </button>
+              <button 
+                onClick={() => setViewMode('map')}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-xs font-bold transition-all ${viewMode === 'map' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                <MapIcon size={14} /> DEPOT MAP
+              </button>
+            </div>
+          </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
@@ -209,9 +359,24 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
           <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-xl">
             <h3 className="font-bold mb-4 flex items-center justify-between">
               Recent Alerts
-              <span className="bg-red-500 text-[10px] px-2 py-0.5 rounded-full">3 NEW</span>
+              <span className="bg-red-500 text-[10px] px-2 py-0.5 rounded-full">{3 + staleBuses.length} NEW</span>
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {/* Stale Bus Alerts */}
+              {staleBuses.map(bus => {
+                const hoursSinceLastTap = bus.lastTapTime 
+                  ? Math.floor((currentTime - new Date(bus.lastTapTime).getTime()) / (60 * 60 * 1000))
+                  : 0;
+                return (
+                  <AlertItem 
+                    key={bus.id}
+                    title={`${bus.plateNo} (S${bus.serviceNo})`}
+                    desc={`No berth tap for ${hoursSinceLastTap}h - Possible breakdown`}
+                    type="error"
+                    icon={<AlertTriangle size={16} />}
+                  />
+                );
+              })}
               <AlertItem title="Bus SMB123A (67)" desc="Scheduled departure in 5m" type="warning" />
               <AlertItem title="Berth B2 (Alighting)" desc="Sensor mismatch detected" type="error" />
               <AlertItem title="Shift Changeover" desc="3 BCs active for next slot" type="info" />
@@ -219,6 +384,25 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
           </div>
         </div>
       </div>
+        </>
+      )}
+
+      {/* Analytics Tab */}
+      {activeTab === 'analytics' && (
+        <AnalyticsDashboard data={analytics} />
+      )}
+
+      {/* Shift Handover Tab */}
+      {activeTab === 'handover' && (
+        <ShiftHandover
+          notes={shiftNotes}
+          buses={buses}
+          berths={berths}
+          onAddNote={onAddNote}
+          onResolveNote={onResolveNote}
+          onDeleteNote={onDeleteNote}
+        />
+      )}
     </div>
   );
 };
@@ -283,6 +467,17 @@ const BerthCard: React.FC<{ berth: Berth; bus?: Bus; icon: React.ReactNode }> = 
         : 'bg-white border-gray-100 hover:border-gray-200'
       }`}
     >
+      {/* Charging Station Indicator */}
+      {berth.hasCharger && (
+        <div className={`absolute top-2 right-2 p-1.5 rounded-lg ${
+          berth.chargerStatus === 'in-use' ? 'bg-green-500 text-white status-pulse' : 
+          berth.chargerStatus === 'maintenance' ? 'bg-red-500 text-white' : 
+          'bg-gray-200 text-gray-500'
+        }`} title={`Charger: ${berth.chargerStatus}`}>
+          {berth.chargerStatus === 'in-use' ? <BatteryCharging size={14} /> : <Zap size={14} />}
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2.5">
           <div className={`p-2 rounded-xl ${berth.isOccupied ? (isNearDeparture ? 'bg-orange-100' : 'bg-blue-100') : 'bg-gray-50'} transition-colors group-hover:scale-110 duration-300`}>
@@ -315,6 +510,28 @@ const BerthCard: React.FC<{ berth: Berth; bus?: Bus; icon: React.ReactNode }> = 
               {bus.plateNo}
             </div>
           </div>
+          
+          {/* Battery Level */}
+          {bus.batteryLevel !== undefined && (
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase leading-none mb-1.5">Battery Level</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all ${
+                      bus.batteryLevel > 70 ? 'bg-green-500' : 
+                      bus.batteryLevel > 30 ? 'bg-yellow-500' : 
+                      'bg-red-500'
+                    }`}
+                    style={{ width: `${bus.batteryLevel}%` }}
+                  />
+                </div>
+                <span className="text-xs font-black text-gray-900">{bus.batteryLevel}%</span>
+                {bus.isCharging && <BatteryCharging size={14} className="text-green-500 status-pulse" />}
+              </div>
+            </div>
+          )}
+
           <div className="pt-1 flex items-center justify-between">
             <span className={`text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-widest shadow-sm ${
               isNearDeparture ? 'bg-orange-600 text-white' : 'bg-blue-600 text-white'
@@ -354,15 +571,27 @@ const StatCard = ({ title, value, icon, subValue, color = "text-gray-900" }: any
   </div>
 );
 
-const AlertItem = ({ title, desc, type }: any) => {
+const AlertItem = ({ title, desc, type, icon }: any) => {
   const dotColor = type === 'warning' ? 'bg-orange-400' : type === 'error' ? 'bg-red-500' : 'bg-blue-400';
+  const bgColor = type === 'error' ? 'hover:bg-red-900/20' : 'hover:bg-gray-800';
   return (
-    <div className="flex items-start gap-3 border-l-4 border-gray-700 pl-4 py-2 transition-all hover:bg-gray-800 rounded-r-xl">
-      <div className={`w-2.5 h-2.5 rounded-full mt-1.5 ${dotColor} shadow-[0_0_8px_rgba(0,0,0,0.3)]`} />
-      <div>
+    <div className={`flex items-start gap-3 border-l-4 border-gray-700 pl-4 py-2 transition-all ${bgColor} rounded-r-xl`}>
+      {icon ? (
+        <div className={`${type === 'warning' ? 'text-orange-400' : type === 'error' ? 'text-red-400' : 'text-blue-400'} mt-1`}>
+          {icon}
+        </div>
+      ) : (
+        <div className={`w-2.5 h-2.5 rounded-full mt-1.5 ${dotColor} shadow-[0_0_8px_rgba(0,0,0,0.3)]`} />
+      )}
+      <div className="flex-1">
         <div className="text-sm font-black tracking-tight">{title}</div>
         <div className="text-[11px] text-gray-400 font-medium leading-tight mt-0.5">{desc}</div>
       </div>
+      {type === 'error' && (
+        <div className="bg-red-500/20 text-red-400 text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-wider">
+          Critical
+        </div>
+      )}
     </div>
   );
 };
