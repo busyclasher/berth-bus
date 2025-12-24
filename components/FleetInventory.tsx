@@ -49,7 +49,7 @@ const FleetInventory: React.FC<FleetInventoryProps> = ({ buses, berths }) => {
         bus.berthId ? `${bus.level}, ${bus.zone}, ${bus.berthId}` : 'En Route',
         `${bus.batteryLevel || 0}%`,
         bus.assignedTechnician || 'Unassigned',
-        formatTimeSince(bus.lastTapTime)
+        formatTime(bus.lastTapTime)
       ])
     ].map(row => row.join(',')).join('\n');
 
