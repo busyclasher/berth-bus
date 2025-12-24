@@ -219,7 +219,11 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
                     return count > 0 ? (
                       <span key={type} className={`px-2 py-1 rounded-md font-bold border ${colors[type as keyof typeof colors]} flex items-center gap-1`}>
                         {count} {type}
-                        {chargingCount > 0 && <Zap size={12} className="text-green-600" title={`${chargingCount} with charger`} />}
+                        {chargingCount > 0 && (
+                          <span title={`${chargingCount} with charger`}>
+                            <Zap size={12} className="text-green-600" />
+                          </span>
+                        )}
                       </span>
                     ) : null;
                   })}
