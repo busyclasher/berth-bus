@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Bus, Berth, PerformanceMetric } from '../types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { 
@@ -17,7 +17,9 @@ import {
   Bus as BusIcon,
   Timer,
   ChevronRight,
-  Info
+  Info,
+  ShieldAlert,
+  CheckCircle2
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -28,8 +30,37 @@ interface DashboardProps {
 
 const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performance }) => {
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
+  const [alertBerths, setAlertBerths] = useState<Set<string>>(new Set(['B2'])); // Initialize with B2 as an example mismatch
+  const prevBerthsRef = useRef<Berth[]>(berths);
+  
   const occupiedBerthsCount = berths.filter(b => b.isOccupied).length;
   const inPortBuses = buses.filter(b => b.status === 'IN_PORT');
+
+  // Detect unexpected occupancy changes
+  useEffect(() => {
+    const prevBerths = prevBerthsRef.current;
+    
+    berths.forEach((currentBerth, index) => {
+      const prevBerth = prevBerths[index];
+      
+      // If occupancy status changed, simulate a 20% chance of a "Sensor Mismatch" alert
+      if (prevBerth && currentBerth.isOccupied !== prevBerth.isOccupied) {
+        if (Math.random() < 0.2) {
+          setAlertBerths(prev => new Set(prev).add(currentBerth.id));
+        }
+      }
+    });
+    
+    prevBerthsRef.current = berths;
+  }, [berths]);
+
+  const resolveAlert = (id: string) => {
+    setAlertBerths(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
 
   const getBerthIcon = (type: Berth['type']) => {
     switch (type) {
@@ -77,10 +108,17 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-              {viewMode === 'grid' ? 'Berth Matrix' : 'Spatial Depot Layout'}
-              <span className="text-xs font-normal text-gray-400 bg-gray-50 px-2 py-0.5 rounded-md border border-gray-100">Sector Alpha-01</span>
-            </h3>
+            <div className="flex flex-col">
+              <h3 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+                {viewMode === 'grid' ? 'Berth Matrix' : 'Spatial Depot Layout'}
+                {alertBerths.size > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1">
+                    <ShieldAlert size={10} /> {alertBerths.size} MISMATCH
+                  </span>
+                )}
+              </h3>
+              <span className="text-xs font-normal text-gray-400 mt-1">Sector Alpha-01 • Real-time Monitoring</span>
+            </div>
             <div className="flex gap-4 text-[10px] font-bold uppercase tracking-wider text-gray-400">
               <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-blue-500" /> Boarding</span>
               <span className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500" /> Alighting</span>
@@ -93,7 +131,14 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
               {berths.map(berth => {
                 const bus = buses.find(b => b.berthId === berth.id);
                 return (
-                  <BerthCard key={berth.id} berth={berth} bus={bus} icon={getBerthIcon(berth.type)} />
+                  <BerthCard 
+                    key={berth.id} 
+                    berth={berth} 
+                    bus={bus} 
+                    icon={getBerthIcon(berth.type)} 
+                    hasAlert={alertBerths.has(berth.id)}
+                    onResolve={() => resolveAlert(berth.id)}
+                  />
                 );
               })}
             </div>
@@ -103,7 +148,6 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
               <div className="absolute inset-0 z-0 overflow-hidden">
                 <div className="absolute top-0 bottom-0 left-[20%] w-1 bg-gray-300/30" />
                 <div className="absolute top-[40%] left-0 right-0 h-1 bg-gray-300/30" />
-                {/* Lane Markings */}
                 <div className="absolute top-[25%] left-[5%] text-[10px] font-black text-gray-300 rotate-90 uppercase tracking-widest">Entry Roadway</div>
                 <div className="absolute bottom-[25%] right-[5%] text-[10px] font-black text-gray-300 -rotate-90 uppercase tracking-widest">Exit Roadway</div>
               </div>
@@ -115,7 +159,13 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
                     <UserMinus size={12} /> ALIGHTING ZONE
                   </div>
                   {berths.filter(b => b.type === 'ALIGHTING').map(berth => (
-                    <MapBerthItem key={berth.id} berth={berth} bus={buses.find(b => b.berthId === berth.id)} type="alighting" />
+                    <MapBerthItem 
+                      key={berth.id} 
+                      berth={berth} 
+                      bus={buses.find(b => b.berthId === berth.id)} 
+                      type="alighting" 
+                      hasAlert={alertBerths.has(berth.id)}
+                    />
                   ))}
                 </div>
 
@@ -127,13 +177,7 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
                     </div>
                     <h4 className="text-sm font-black text-gray-900 uppercase tracking-tighter mb-1">Passenger Concourse</h4>
                     <p className="text-[10px] text-gray-400 font-medium px-4">Climate controlled boarding lobby & waiting lounge</p>
-                    <div className="mt-4 flex gap-2">
-                      <div className="w-1 h-8 bg-blue-100 rounded-full" />
-                      <div className="w-1 h-8 bg-blue-100 rounded-full" />
-                      <div className="w-1 h-8 bg-blue-100 rounded-full" />
-                    </div>
                   </div>
-                  {/* Arrows indicating flow */}
                   <div className="absolute left-[-15px] top-1/2 -translate-y-1/2 text-gray-300">
                     <ChevronRight size={24} strokeWidth={3} />
                   </div>
@@ -148,27 +192,34 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
                     <UserPlus size={12} /> BOARDING ZONE
                   </div>
                   {berths.filter(b => b.type === 'BOARDING').map(berth => (
-                    <MapBerthItem key={berth.id} berth={berth} bus={buses.find(b => b.berthId === berth.id)} type="boarding" />
+                    <MapBerthItem 
+                      key={berth.id} 
+                      berth={berth} 
+                      bus={buses.find(b => b.berthId === berth.id)} 
+                      type="boarding" 
+                      hasAlert={alertBerths.has(berth.id)}
+                    />
                   ))}
                 </div>
 
                 {/* Bottom: Layover Area */}
                 <div className="col-span-12 mt-8 pt-8 border-t border-gray-200">
                   <div className="text-[10px] font-bold text-gray-500 mb-4 flex items-center gap-1 uppercase tracking-widest">
-                    <ParkingCircle size={14} /> Layover & Standby Parking (Basement L1)
+                    <ParkingCircle size={14} /> Layover & Standby Parking
                   </div>
                   <div className="grid grid-cols-4 gap-4">
                     {berths.filter(b => b.type === 'LAYOVER').map(berth => (
-                      <MapBerthItem key={berth.id} berth={berth} bus={buses.find(b => b.berthId === berth.id)} type="layover" horizontal />
+                      <MapBerthItem 
+                        key={berth.id} 
+                        berth={berth} 
+                        bus={buses.find(b => b.berthId === berth.id)} 
+                        type="layover" 
+                        horizontal 
+                        hasAlert={alertBerths.has(berth.id)}
+                      />
                     ))}
                   </div>
                 </div>
-              </div>
-
-              {/* Navigation Indicator */}
-              <div className="absolute top-6 right-6 flex flex-col items-center opacity-40">
-                <Navigation size={24} className="text-gray-400 -rotate-45" />
-                <span className="text-[8px] font-bold text-gray-400 mt-1 uppercase">North</span>
               </div>
             </div>
           )}
@@ -198,23 +249,30 @@ const OperationsDashboard: React.FC<DashboardProps> = ({ buses, berths, performa
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="mt-4 p-4 bg-orange-50 rounded-2xl flex items-start gap-3">
+            <div className="mt-4 p-4 bg-orange-50 rounded-2xl flex items-start gap-3 border border-orange-100">
               <Info className="text-orange-500 shrink-0" size={20} />
               <p className="text-xs text-orange-700 font-medium leading-relaxed">
-                Service 190 at B2 shows 22m turnaround. Check if alighting is clear.
+                Congestion detected in Alighting Finger 2. Suggest dynamic layover routing.
               </p>
             </div>
           </div>
 
           <div className="bg-gray-900 text-white p-6 rounded-3xl shadow-xl">
             <h3 className="font-bold mb-4 flex items-center justify-between">
-              Recent Alerts
-              <span className="bg-red-500 text-[10px] px-2 py-0.5 rounded-full">3 NEW</span>
+              Critical Alerts
+              <span className="bg-red-500 text-[10px] px-2 py-0.5 rounded-full">{alertBerths.size + 2} ACTIVE</span>
             </h3>
             <div className="space-y-4">
+              {Array.from(alertBerths).map(id => (
+                <AlertItem 
+                  key={id} 
+                  title={`Unexpected Occupancy: ${id}`} 
+                  desc="Sensor/System Mismatch" 
+                  type="error" 
+                />
+              ))}
               <AlertItem title="Bus SMB123A (67)" desc="Scheduled departure in 5m" type="warning" />
-              <AlertItem title="Berth B2 (Alighting)" desc="Sensor mismatch detected" type="error" />
-              <AlertItem title="Shift Changeover" desc="3 BCs active for next slot" type="info" />
+              <AlertItem title="Shift Handover" desc="OM #42 taking control" type="info" />
             </div>
           </div>
         </div>
@@ -228,7 +286,8 @@ const MapBerthItem: React.FC<{
   bus?: Bus; 
   type: 'boarding' | 'alighting' | 'layover';
   horizontal?: boolean;
-}> = ({ berth, bus, type, horizontal }) => {
+  hasAlert?: boolean;
+}> = ({ berth, bus, type, horizontal, hasAlert }) => {
   const isNearDeparture = bus?.scheduledDeparture && 
     (new Date(bus.scheduledDeparture).getTime() - Date.now() < 300000);
 
@@ -237,63 +296,82 @@ const MapBerthItem: React.FC<{
       className={`relative group transition-all duration-300 ${
         horizontal ? 'w-full h-16' : 'w-full h-20'
       } rounded-xl border-2 overflow-hidden flex flex-col items-center justify-center ${
-        berth.isOccupied 
-        ? isNearDeparture 
-          ? 'bg-orange-600 border-orange-400 text-white shadow-lg shadow-orange-200' 
-          : 'bg-blue-600 border-blue-400 text-white shadow-lg shadow-blue-100'
-        : 'bg-white border-gray-200 text-gray-400'
+        hasAlert
+        ? 'bg-red-600 border-red-400 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)] z-40'
+        : berth.isOccupied 
+          ? isNearDeparture 
+            ? 'bg-orange-600 border-orange-400 text-white shadow-lg' 
+            : 'bg-blue-600 border-blue-400 text-white shadow-lg'
+          : 'bg-white border-gray-200 text-gray-400'
       }`}
     >
       <div className={`absolute top-1 left-1.5 text-[8px] font-black uppercase tracking-tighter opacity-60`}>
         {berth.id}
       </div>
       
+      {hasAlert && (
+        <div className="absolute top-1 right-1.5 text-white animate-pulse">
+          <ShieldAlert size={10} />
+        </div>
+      )}
+
       {bus ? (
         <div className="flex flex-col items-center gap-0.5">
           <div className="text-xs font-black tracking-tighter">S-{bus.serviceNo}</div>
           <div className="text-[8px] font-bold opacity-75">{bus.plateNo.slice(-4)}</div>
-          {isNearDeparture && <div className="absolute top-1 right-1.5 w-1.5 h-1.5 bg-white rounded-full status-pulse" />}
         </div>
       ) : (
         <div className="opacity-30">
-          {type === 'boarding' ? <UserPlus size={16} /> : type === 'alighting' ? <UserMinus size={16} /> : <ParkingCircle size={16} />}
+          {hasAlert ? <ShieldAlert size={16} /> : type === 'boarding' ? <UserPlus size={16} /> : type === 'alighting' ? <UserMinus size={16} /> : <ParkingCircle size={16} />}
         </div>
       )}
-
-      {/* Hover Detail Overlay */}
-      <div className="absolute inset-0 bg-black/80 text-white opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-1 text-center pointer-events-none">
-        <div className="text-[8px] font-black uppercase tracking-widest">{berth.label}</div>
-        {bus && <div className="text-[9px] font-mono mt-0.5">{bus.plateNo}</div>}
-      </div>
     </div>
   );
 };
 
-const BerthCard: React.FC<{ berth: Berth; bus?: Bus; icon: React.ReactNode }> = ({ berth, bus, icon }) => {
+const BerthCard: React.FC<{ 
+  berth: Berth; 
+  bus?: Bus; 
+  icon: React.ReactNode; 
+  hasAlert?: boolean;
+  onResolve: () => void;
+}> = ({ berth, bus, icon, hasAlert, onResolve }) => {
   const isNearDeparture = bus?.scheduledDeparture && 
     (new Date(bus.scheduledDeparture).getTime() - Date.now() < 300000);
 
   return (
     <div 
       className={`p-4 rounded-2xl border-2 transition-all relative overflow-hidden group ${
-        berth.isOccupied 
-        ? isNearDeparture 
-          ? 'bg-orange-50 border-orange-200 shadow-lg'
-          : 'bg-blue-50 border-blue-200 shadow-sm' 
-        : 'bg-white border-gray-100 hover:border-gray-200'
+        hasAlert
+        ? 'bg-red-50 border-red-500 shadow-lg ring-2 ring-red-100 z-30'
+        : berth.isOccupied 
+          ? isNearDeparture 
+            ? 'bg-orange-50 border-orange-200 shadow-lg'
+            : 'bg-blue-50 border-blue-200 shadow-sm' 
+          : 'bg-white border-gray-100 hover:border-gray-200'
       }`}
     >
-      <div className="flex justify-between items-center mb-4">
+      {/* Alert Banner */}
+      {hasAlert && (
+        <div className="absolute top-0 left-0 right-0 bg-red-600 text-white text-[9px] font-black py-1 px-3 flex items-center justify-between uppercase tracking-widest animate-pulse">
+          <div className="flex items-center gap-1"><ShieldAlert size={10} /> SENSOR MISMATCH</div>
+        </div>
+      )}
+
+      <div className={`flex justify-between items-center ${hasAlert ? 'mt-4 mb-4' : 'mb-4'}`}>
         <div className="flex items-center gap-2.5">
-          <div className={`p-2 rounded-xl ${berth.isOccupied ? (isNearDeparture ? 'bg-orange-100' : 'bg-blue-100') : 'bg-gray-50'} transition-colors group-hover:scale-110 duration-300`}>
-            {icon}
+          <div className={`p-2 rounded-xl ${
+            hasAlert ? 'bg-red-100 text-red-600' :
+            berth.isOccupied ? (isNearDeparture ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600') : 'bg-gray-50 text-gray-400'
+          } transition-colors`}>
+            {hasAlert ? <ShieldAlert size={14} /> : icon}
           </div>
           <div>
-            <span className="text-xs font-black text-gray-700 uppercase tracking-tighter block leading-none">{berth.label}</span>
+            <span className={`text-xs font-black uppercase tracking-tighter block leading-none ${hasAlert ? 'text-red-700' : 'text-gray-700'}`}>{berth.label}</span>
             <span className="text-[9px] font-bold text-gray-400 uppercase tracking-[0.1em] mt-0.5 block">{berth.type}</span>
           </div>
         </div>
-        {isNearDeparture && (
+        {isNearDeparture && !hasAlert && (
           <div className="bg-orange-500 text-white p-1 rounded-md status-pulse">
             <Timer size={14} />
           </div>
@@ -301,9 +379,11 @@ const BerthCard: React.FC<{ berth: Berth; bus?: Bus; icon: React.ReactNode }> = 
       </div>
       
       {bus ? (
-        <div className="space-y-3 bg-white p-3 rounded-xl border border-blue-100 shadow-inner">
+        <div className={`space-y-3 p-3 rounded-xl border transition-all ${
+          hasAlert ? 'bg-white border-red-100 shadow-inner' : 'bg-white border-blue-100 shadow-inner'
+        }`}>
           <div className="flex items-center gap-2">
-            <BusIcon size={18} className={isNearDeparture ? "text-orange-600" : "text-blue-600"} />
+            <BusIcon size={18} className={hasAlert ? "text-red-600" : (isNearDeparture ? "text-orange-600" : "text-blue-600")} />
             <div>
               <div className="text-[10px] font-bold text-gray-400 uppercase leading-none">Service Number</div>
               <div className="text-xl font-black text-gray-900 leading-tight">S{bus.serviceNo}</div>
@@ -311,30 +391,48 @@ const BerthCard: React.FC<{ berth: Berth; bus?: Bus; icon: React.ReactNode }> = 
           </div>
           <div>
             <div className="text-[10px] font-bold text-gray-400 uppercase leading-none mb-1">Vehicle Plate</div>
-            <div className="text-xs font-mono font-black text-gray-700 tracking-wider bg-gray-50 px-2 py-1 rounded-md border border-gray-100 inline-block">
+            <div className={`text-xs font-mono font-black tracking-wider px-2 py-1 rounded-md border inline-block ${
+              hasAlert ? 'bg-red-50 border-red-100 text-red-900' : 'bg-gray-50 border-gray-100 text-gray-700'
+            }`}>
               {bus.plateNo}
             </div>
           </div>
           <div className="pt-1 flex items-center justify-between">
             <span className={`text-[9px] px-2 py-1 rounded-md font-black uppercase tracking-widest shadow-sm ${
-              isNearDeparture ? 'bg-orange-600 text-white' : 'bg-blue-600 text-white'
+              hasAlert ? 'bg-red-600 text-white' : (isNearDeparture ? 'bg-orange-600 text-white' : 'bg-blue-600 text-white')
             }`}>
               {bus.status.replace('_', ' ')}
             </span>
-            {isNearDeparture && (
-              <span className="text-[8px] font-black text-orange-600 uppercase animate-pulse flex items-center gap-1">
-                <AlertCircle size={8} /> Departure Imminent
-              </span>
-            )}
           </div>
         </div>
       ) : (
-        <div className="h-[108px] flex flex-col items-center justify-center bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
-          <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-200 mb-2">
-            <Info size={16} />
-          </div>
-          <div className="text-[10px] text-gray-300 font-black uppercase tracking-[0.2em] italic">Vacant Berth</div>
+        <div className={`h-[108px] flex flex-col items-center justify-center rounded-xl border border-dashed transition-all ${
+          hasAlert ? 'bg-red-50 border-red-300' : 'bg-gray-50/50 border-gray-200'
+        }`}>
+          {hasAlert ? (
+            <>
+              <ShieldAlert className="text-red-500 mb-2" size={24} />
+              <div className="text-[9px] text-red-600 font-black uppercase tracking-widest text-center px-4">Unexpected Presence Detected</div>
+            </>
+          ) : (
+            <>
+              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-gray-200 mb-2">
+                <Info size={16} />
+              </div>
+              <div className="text-[10px] text-gray-300 font-black uppercase tracking-[0.2em] italic">Vacant Berth</div>
+            </>
+          )}
         </div>
+      )}
+
+      {/* Resolution Action */}
+      {hasAlert && (
+        <button 
+          onClick={onResolve}
+          className="mt-3 w-full py-2 bg-white border border-red-200 rounded-lg text-red-600 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-600 hover:text-white transition-all shadow-sm"
+        >
+          <CheckCircle2 size={12} /> Resolve Mismatch
+        </button>
       )}
     </div>
   );
@@ -356,11 +454,13 @@ const StatCard = ({ title, value, icon, subValue, color = "text-gray-900" }: any
 
 const AlertItem = ({ title, desc, type }: any) => {
   const dotColor = type === 'warning' ? 'bg-orange-400' : type === 'error' ? 'bg-red-500' : 'bg-blue-400';
+  const bgColor = type === 'error' ? 'bg-red-500/10' : 'hover:bg-gray-800';
+  
   return (
-    <div className="flex items-start gap-3 border-l-4 border-gray-700 pl-4 py-2 transition-all hover:bg-gray-800 rounded-r-xl">
+    <div className={`flex items-start gap-3 border-l-4 border-gray-700 pl-4 py-2 transition-all rounded-r-xl ${bgColor}`}>
       <div className={`w-2.5 h-2.5 rounded-full mt-1.5 ${dotColor} shadow-[0_0_8px_rgba(0,0,0,0.3)]`} />
       <div>
-        <div className="text-sm font-black tracking-tight">{title}</div>
+        <div className={`text-sm font-black tracking-tight ${type === 'error' ? 'text-red-400' : 'text-white'}`}>{title}</div>
         <div className="text-[11px] text-gray-400 font-medium leading-tight mt-0.5">{desc}</div>
       </div>
     </div>

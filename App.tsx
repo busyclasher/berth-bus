@@ -19,27 +19,28 @@ const App: React.FC = () => {
   const handleStatusUpdate = (busId: string, status: Bus['status'], berthId?: string) => {
     setBuses(prevBuses => prevBuses.map(bus => {
       if (bus.id === busId) {
-        // Clear old berth if moving
+        // Handle departure logic: clear old berth if moving out
         const oldBerthId = bus.berthId;
-        if (oldBerthId && oldBerthId !== berthId) {
+        if ((status === 'EN_ROUTE' || (berthId && oldBerthId !== berthId)) && oldBerthId) {
           setBerths(prevBerths => prevBerths.map(b => 
             b.id === oldBerthId ? { ...b, isOccupied: false, busId: undefined } : b
           ));
         }
 
-        // Set new berth
-        if (berthId) {
+        // Handle arrival logic: set new berth
+        if (berthId && status !== 'EN_ROUTE') {
           setBerths(prevBerths => prevBerths.map(b => 
             b.id === berthId ? { ...b, isOccupied: true, busId: busId } : b
           ));
         }
 
+        // Return updated bus object
         return {
           ...bus,
           status,
-          berthId,
-          checkInTime: status === 'IN_PORT' ? new Date().toISOString() : bus.checkInTime,
-          scheduledDeparture: status === 'IN_PORT' ? new Date(Date.now() + 15 * 60000).toISOString() : bus.scheduledDeparture
+          berthId: status === 'EN_ROUTE' ? undefined : berthId || bus.berthId,
+          checkInTime: status === 'IN_PORT' ? new Date().toISOString() : (status === 'EN_ROUTE' ? undefined : bus.checkInTime),
+          scheduledDeparture: status === 'IN_PORT' ? new Date(Date.now() + 15 * 60000).toISOString() : (status === 'EN_ROUTE' ? undefined : bus.scheduledDeparture)
         };
       }
       return bus;

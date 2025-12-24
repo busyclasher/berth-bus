@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Bus, Berth } from '../types';
-import { Smartphone, Clock, MapPin, Navigation2, AlertTriangle, BellRing, CheckCircle, Bus as BusIcon } from 'lucide-react';
+import { Smartphone, Clock, MapPin, Navigation2, AlertTriangle, BellRing, CheckCircle, Bus as BusIcon, ListChecks, Loader2, Zap, ShieldCheck, Radio } from 'lucide-react';
 
 interface BCProps {
   bus: Bus;
@@ -14,67 +14,81 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
   const [showNfcPrompt, setShowNfcPrompt] = useState(false);
   const [showPunctualityPrompt, setShowPunctualityPrompt] = useState(false);
   const [showSuccessState, setShowSuccessState] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [hasVibrated, setHasVibrated] = useState(false);
   const [selectedBerth, setSelectedBerth] = useState<string>('');
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
-  // Trigger modal when externalTriggerTapIn changes
+  // Trigger modal when externalTriggerTapIn changes (from Gemini Voice Assistant)
   useEffect(() => {
     if (externalTriggerTapIn > 0 && bus.status === 'EN_ROUTE') {
       setShowNfcPrompt(true);
     }
   }, [externalTriggerTapIn, bus.status]);
 
+  // Haptic Feedback for Punctuality Prompt
   useEffect(() => {
-    if (bus.scheduledDeparture) {
+    if (showPunctualityPrompt && 'vibrate' in navigator) {
+      // Urgent triple-pulse pattern for departure awareness
+      navigator.vibrate([400, 100, 400, 100, 400]);
+    }
+  }, [showPunctualityPrompt]);
+
+  useEffect(() => {
+    if (bus.scheduledDeparture && bus.status === 'IN_PORT') {
       const interval = setInterval(() => {
         const diff = new Date(bus.scheduledDeparture!).getTime() - Date.now();
         const seconds = Math.max(0, Math.floor(diff / 1000));
         setTimeLeft(seconds);
 
         // Punctuality Prompt at 5 minutes (300 seconds)
-        if (seconds <= 300 && seconds > 290 && !hasVibrated) {
+        if (seconds <= 300 && seconds > 0 && !hasVibrated) {
           setShowPunctualityPrompt(true);
-          if ('vibrate' in navigator) {
-            navigator.vibrate([200, 100, 200]);
-          }
           setHasVibrated(true);
-        }
-        
-        // Reset vibration flag if time is extended or bus resets
-        if (seconds > 300) {
-          setHasVibrated(false);
         }
       }, 1000);
       return () => clearInterval(interval);
     } else {
       setTimeLeft(null);
-      setHasVibrated(false);
+      if (bus.status !== 'IN_PORT') {
+        setHasVibrated(false);
+        setShowPunctualityPrompt(false);
+      }
     }
-  }, [bus.scheduledDeparture, hasVibrated]);
+  }, [bus.scheduledDeparture, bus.status, hasVibrated]);
 
   const handleTapIn = () => {
     if (selectedBerth) {
-      onStatusUpdate(bus.id, 'IN_PORT', selectedBerth);
-      setShowNfcPrompt(false);
-      setHasVibrated(false);
+      setIsProcessing(true);
       
-      // Trigger success state
-      setShowSuccessState(true);
-      if ('vibrate' in navigator) {
-        navigator.vibrate(100);
-      }
-      
-      // Auto-dismiss success after 2.5 seconds
+      // Artificial delay to simulate precision backend sync
       setTimeout(() => {
-        setShowSuccessState(false);
-      }, 2500);
+        onStatusUpdate(bus.id, 'IN_PORT', selectedBerth);
+        setIsProcessing(false);
+        setShowNfcPrompt(false);
+        setHasVibrated(false);
+        
+        setShowSuccessState(true);
+        if ('vibrate' in navigator) {
+          navigator.vibrate(100);
+        }
+        
+        // Extended auto-dismiss for visibility, but manual dismissal is possible
+        const timer = setTimeout(() => {
+          setShowSuccessState(false);
+        }, 4000);
+        return () => clearTimeout(timer);
+      }, 1200);
     }
   };
 
   const handleTapOut = () => {
     onStatusUpdate(bus.id, 'EN_ROUTE', undefined);
     setShowPunctualityPrompt(false);
+    setHasVibrated(false);
+    if ('vibrate' in navigator) {
+      navigator.vibrate(50);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -104,12 +118,15 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
           onClick={() => setShowNfcPrompt(true)}
           className="bg-white border-2 border-dashed border-blue-200 rounded-3xl p-10 flex flex-col items-center justify-center gap-6 transition-all hover:border-blue-500 hover:bg-blue-50/30 active:scale-95 shadow-sm group"
         >
-          <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
-            <Smartphone size={40} />
+          <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform relative">
+             <Smartphone size={40} />
+             <div className="absolute -top-1 -right-1 bg-blue-600 text-white p-1 rounded-full border-2 border-white animate-pulse">
+                <Radio size={12} />
+             </div>
           </div>
           <div className="text-center">
-            <h3 className="font-black text-xl text-gray-900">Tap-In at Berth</h3>
-            <p className="text-gray-500 text-sm mt-1 font-medium">Hold device near NFC tag on arrival</p>
+            <h3 className="font-black text-xl text-gray-900 uppercase tracking-tight">Tap-In at Berth</h3>
+            <p className="text-gray-500 text-sm mt-1 font-medium italic">Detection active. Tap NFC tag.</p>
           </div>
         </button>
       )}
@@ -126,15 +143,30 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
             </div>
           </div>
 
-          <div className="flex items-center gap-5">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm ${timeLeft !== null && timeLeft < 300 ? 'bg-orange-100 text-orange-600 status-pulse' : 'bg-blue-50 text-blue-600'}`}>
-              <Clock size={28} />
-            </div>
-            <div>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${timeLeft !== null && timeLeft < 300 ? 'bg-orange-100 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+                <Clock size={20} />
+              </div>
               <p className="text-gray-400 text-[10px] font-black uppercase tracking-widest">Departure Countdown</p>
-              <h3 className={`text-4xl font-mono font-black tracking-tighter ${timeLeft !== null && timeLeft < 300 ? 'text-orange-600' : 'text-gray-900'}`}>
+            </div>
+            
+            <div className={`p-8 rounded-[2.5rem] border-2 flex flex-col items-center justify-center transition-all ${
+              timeLeft !== null && timeLeft < 300 
+                ? 'bg-orange-50 border-orange-200 shadow-[0_15px_40px_rgba(249,115,22,0.15)]' 
+                : 'bg-gray-50 border-transparent'
+            }`}>
+              <h3 className={`text-8xl font-mono font-black tracking-tighter tabular-nums ${
+                timeLeft !== null && timeLeft < 300 ? 'text-orange-600' : 'text-gray-900'
+              }`}>
                 {timeLeft !== null ? formatTime(timeLeft) : '--:--'}
               </h3>
+              <div className={`flex gap-16 mt-2 font-black uppercase tracking-[0.3em] text-[10px] ${
+                timeLeft !== null && timeLeft < 300 ? 'text-orange-400/70' : 'text-gray-300'
+              }`}>
+                <span>Mins</span>
+                <span>Secs</span>
+              </div>
             </div>
           </div>
 
@@ -148,21 +180,56 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
         </div>
       )}
 
-      {/* Success Animation Overlay */}
+      {/* Processing Animation Overlay */}
+      {isProcessing && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[210] flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
+           <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-4">
+              <Loader2 size={48} className="text-blue-600 animate-spin" />
+              <div>
+                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tight">Syncing Hub Data</h2>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mt-1">Verifying Berth {selectedBerth}</p>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Enhanced Success Confirmation Step */}
       {showSuccessState && (
-        <div className="fixed inset-0 bg-green-600/95 backdrop-blur-xl z-[200] flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-300">
-          <div className="bg-white rounded-full p-8 mb-8 shadow-2xl scale-110 animate-bounce">
-            <CheckCircle size={96} className="text-green-600" />
+        <div className="fixed inset-0 bg-green-600 z-[220] flex flex-col items-center justify-center p-6 text-center animate-in fade-in zoom-in duration-300">
+          <div className="relative mb-8">
+            <div className="bg-white rounded-full p-10 shadow-2xl scale-110 animate-bounce">
+              <CheckCircle size={96} className="text-green-600" />
+            </div>
+            <div className="absolute -bottom-2 -right-2 bg-white text-green-600 p-2 rounded-full border-4 border-green-600 animate-pulse">
+              <ShieldCheck size={32} fill="currentColor" className="text-white" />
+            </div>
           </div>
-          <h2 className="text-4xl font-black text-white tracking-tight mb-3">Arrival Verified</h2>
-          <div className="space-y-1">
-            <p className="text-green-50 font-black uppercase tracking-[0.2em] text-sm">Assigned Berth: {selectedBerth}</p>
-            <p className="text-green-100/70 font-bold uppercase tracking-widest text-[10px]">Service {bus.serviceNo} • System Synced</p>
+          
+          <h2 className="text-5xl font-black text-white tracking-tight mb-2">ARRIVAL LOGGED</h2>
+          <p className="text-green-100 font-bold uppercase tracking-widest text-sm opacity-80 mb-8">Hub Systems Updated Successfully</p>
+          
+          <div className="w-full max-w-xs space-y-2 bg-black/10 px-8 py-6 rounded-[2rem] backdrop-blur-md border border-white/10">
+            <div className="flex justify-between items-center text-green-50">
+              <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Assigned Berth</span>
+              <span className="text-2xl font-black">BERTH {selectedBerth}</span>
+            </div>
+            <div className="h-px bg-white/10 w-full my-2"></div>
+            <div className="flex justify-between items-center text-green-50">
+              <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Service ID</span>
+              <span className="text-sm font-black">{bus.serviceNo}</span>
+            </div>
           </div>
-          <div className="mt-12 flex gap-3">
-             <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse" />
-             <div className="w-2 h-2 rounded-full bg-white/60 animate-pulse delay-75" />
-             <div className="w-2 h-2 rounded-full bg-white/40 animate-pulse delay-150" />
+
+          <div className="mt-12 w-full max-w-xs space-y-4">
+            <button 
+              onClick={() => setShowSuccessState(false)}
+              className="w-full bg-white text-green-600 font-black py-5 rounded-2xl shadow-xl hover:bg-green-50 active:scale-95 transition-all uppercase tracking-[0.15em] text-sm"
+            >
+              Continue to Terminal View
+            </button>
+            <div className="w-full h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div className="h-full bg-white animate-[shrink_4s_linear]" style={{ width: '100%' }}></div>
+            </div>
           </div>
         </div>
       )}
@@ -170,22 +237,49 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
       {/* NFC / Berth Selection Modal */}
       {showNfcPrompt && (
         <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-md z-[100] flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 animate-slide-up shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-black text-gray-900 tracking-tight">Select Berth</h2>
-              <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
-                <Smartphone size={20} />
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 animate-slide-up shadow-2xl overflow-hidden relative">
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-2xl font-black text-gray-900 tracking-tight uppercase">Berth Arrival</h2>
+              <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600">
+                <Smartphone size={24} />
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3 mb-8">
+
+            {/* Prominent NFC Instruction */}
+            <div className="bg-blue-600 text-white rounded-[2rem] p-6 mb-8 shadow-xl shadow-blue-500/20 relative overflow-hidden group">
+               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                  <Radio size={80} strokeWidth={1} />
+               </div>
+               <div className="flex items-center gap-5 relative z-10">
+                  <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-md relative">
+                    <Smartphone size={32} className="animate-pulse" />
+                    <div className="absolute inset-0 bg-white rounded-full scale-150 opacity-10 animate-ping" />
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-black uppercase tracking-tight leading-tight">Ready to Scan</h4>
+                    <p className="text-blue-100 text-xs font-medium mt-1">Hold device near the <span className="font-black text-white">NFC tag</span> at your berth.</p>
+                  </div>
+               </div>
+            </div>
+
+            <div className="mb-4 flex items-center justify-between px-2">
+               <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Select Berth Below</span>
+               <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse delay-75" />
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-200 animate-pulse delay-150" />
+               </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 mb-8">
               {berths.map(berth => (
                 <button
                   key={berth.id}
                   onClick={() => setSelectedBerth(berth.id)}
                   disabled={berth.isOccupied}
-                  className={`py-4 rounded-2xl font-black transition-all text-sm ${
+                  className={`py-4 rounded-xl font-black transition-all duration-300 text-sm ${
                     selectedBerth === berth.id
-                      ? 'bg-blue-600 text-white shadow-xl scale-105 ring-4 ring-blue-100'
+                      ? 'bg-blue-600 text-white shadow-xl scale-110 ring-4 ring-blue-100 z-10'
                       : berth.isOccupied
                       ? 'bg-gray-100 text-gray-300 cursor-not-allowed opacity-50'
                       : 'bg-gray-50 text-gray-700 hover:bg-gray-100 hover:scale-105 active:scale-95'
@@ -195,15 +289,24 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
                 </button>
               ))}
             </div>
+
             <div className="flex flex-col gap-3">
               <button
-                disabled={!selectedBerth}
+                disabled={!selectedBerth || isProcessing}
                 onClick={handleTapIn}
-                className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl disabled:opacity-50 disabled:grayscale shadow-lg active:scale-95 transition-all uppercase tracking-widest text-sm"
+                className="w-full py-5 bg-gray-900 text-white font-black rounded-2xl disabled:opacity-50 disabled:grayscale shadow-lg active:scale-95 transition-all uppercase tracking-widest text-sm flex items-center justify-center gap-2"
               >
-                Confirm Arrival
+                {isProcessing ? <Loader2 className="animate-spin" size={20} /> : 'Complete Arrival'}
               </button>
-              <button onClick={() => setShowNfcPrompt(false)} className="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors uppercase tracking-widest text-[10px]">Cancel Tap-In</button>
+              <button 
+                onClick={() => {
+                  setShowNfcPrompt(false);
+                  setSelectedBerth('');
+                }} 
+                className="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors uppercase tracking-widest text-[10px]"
+              >
+                Cancel Tap-In
+              </button>
             </div>
           </div>
         </div>
@@ -212,25 +315,50 @@ const BusCaptainInterface: React.FC<BCProps> = ({ bus, berths, onStatusUpdate, e
       {/* Punctuality Prompt Modal */}
       {showPunctualityPrompt && (
         <div className="fixed inset-0 bg-orange-600/90 backdrop-blur-lg z-[110] flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-sm rounded-[3rem] p-10 shadow-2xl text-center space-y-6">
-            <div className="mx-auto w-24 h-24 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 animate-bounce">
-              <BellRing size={48} strokeWidth={2.5} />
+          <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl text-center space-y-6 animate-in zoom-in duration-300">
+            <div className="mx-auto w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 animate-bounce relative">
+              <BellRing size={40} strokeWidth={2.5} />
+              <div className="absolute -top-1 -right-1 bg-red-500 text-white p-1 rounded-full border-2 border-white animate-pulse">
+                <Zap size={10} fill="currentColor" />
+              </div>
             </div>
             <div>
-              <h2 className="text-3xl font-black text-gray-900 tracking-tight">5-Minute Warning</h2>
-              <p className="text-gray-500 mt-2 font-medium leading-relaxed">
-                Scheduled departure is in exactly 5 minutes. Please ensure all boarding is complete and prepare for departure.
+              <div className="flex flex-col items-center gap-1 mb-2">
+                <h2 className="text-3xl font-black text-gray-900 tracking-tight">5-Min Warning</h2>
+                <span className="flex items-center gap-1.5 text-[9px] font-black text-orange-600 uppercase tracking-widest bg-orange-50 px-3 py-1 rounded-full border border-orange-100">
+                  <Zap size={10} /> Haptic Alert Active
+                </span>
+              </div>
+              <div className="mt-2 inline-block px-6 py-2 bg-orange-50 text-orange-700 font-black rounded-2xl text-3xl font-mono border-2 border-orange-200 shadow-inner">
+                {timeLeft !== null ? formatTime(timeLeft) : '05:00'}
+              </div>
+              <p className="text-gray-500 mt-4 font-medium leading-tight text-sm">
+                Service {bus.serviceNo} is scheduled for immediate departure.
               </p>
             </div>
-            <div className="bg-orange-50 p-4 rounded-2xl flex items-center justify-center gap-3 border border-orange-100">
-              <AlertTriangle className="text-orange-600" size={20} />
-              <span className="text-orange-700 font-black text-sm uppercase tracking-wider">Haptic Nudge Triggered</span>
+            
+            <div className="bg-gray-50 p-5 rounded-2xl text-left space-y-3 border border-gray-100">
+              <div className="flex items-center gap-2 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                <ListChecks size={14} /> Readiness Checklist
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-4 h-4 rounded border-2 border-orange-400 bg-orange-50" />
+                <span className="text-xs font-bold text-gray-700">All boarding complete</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-4 h-4 rounded border-2 border-orange-400 bg-orange-50" />
+                <span className="text-xs font-bold text-gray-700">Engine systems checked</span>
+              </div>
             </div>
+
             <button
-              onClick={() => setShowPunctualityPrompt(false)}
+              onClick={() => {
+                setShowPunctualityPrompt(false);
+                if ('vibrate' in navigator) navigator.vibrate(50);
+              }}
               className="w-full py-5 bg-gray-900 text-white font-black rounded-2xl shadow-xl active:scale-95 transition-all uppercase tracking-widest text-sm"
             >
-              Understood
+              Acknowledge & Dismiss
             </button>
           </div>
         </div>
